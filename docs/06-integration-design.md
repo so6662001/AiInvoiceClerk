@@ -34,6 +34,8 @@
 
 ### 1.2 核心接口对接
 
+#### 1.2.1 销项开票接口
+
 | 诺诺网接口 | 用途 | 调用时机 |
 |-----------|------|---------|
 | getMerchantToken | 获取授权 Token | 启动时 + Token 过期前 |
@@ -41,6 +43,36 @@
 | deliveryInvoice | 发票交付 | 开票成功后获取 PDF/OFD |
 | reInvoice | 发票重开 | 红冲后重开 |
 | queryInvoiceResult | 查询开票结果 | 回调超时时主动查询 |
+
+#### 1.2.2 进项收票接口（收票智能体使用）
+
+| 诺诺网接口 | 用途 | 调用时机 |
+|-----------|------|---------|
+| queryInvoicesIncome | 查询进项发票列表 | 定时拉取（每30分钟）/ 手动触发 |
+| queryInvoiceDetail | 查询进项发票明细 | 按需获取发票完整明细 |
+| queryInvoiceStatistics | 进项发票统计 | 台账对账、月末汇总 |
+| invoiceAuthStatus | 查询发票认证状态 | 同步认证状态到台账 |
+
+**进项发票拉取流程**
+
+```
+input-service (收票引擎)
+  │
+  ├─ 定时任务 InvoicePullJob (每30分钟)
+  │   ├─ 获取上次拉取时间 (Redis: recv:pull:lastTime:{tenantId})
+  │   ├─ 调用 queryInvoicesIncome(startDate, endDate)
+  │   ├─ 分页循环拉取 (pageSize=50)
+  │   ├─ 幂等校验 (Redis Set + DB 唯一键)
+  │   ├─ 解析并入库 t_received_invoice + t_received_invoice_item
+  │   ├─ 更新拉取时间
+  │   └─ 发送 MQ 事件: RECEIVE_INVOICE.RECEIVED
+  │
+  └─ 诺诺网回调推送 (实时)
+      ├─ 诺诺网配置回调地址: /callback/nuonuo/input-invoice
+      ├─ 验证回调签名
+      ├─ 解析并入库
+      └─ 发送 MQ 事件: RECEIVE_INVOICE.RECEIVED
+```
 
 ### 1.3 回调处理
 
