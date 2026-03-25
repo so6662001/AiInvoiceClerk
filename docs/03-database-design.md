@@ -123,6 +123,69 @@ CREATE TABLE t_customer_invoice_title (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='客户开票抬头表';
 ```
 
+#### t_invoice_consolidation_group — 开票归集组
+
+```sql
+CREATE TABLE t_invoice_consolidation_group (
+    id                      BIGINT          NOT NULL COMMENT '归集组ID',
+    tenant_id               BIGINT          NOT NULL COMMENT '租户ID',
+    group_name              VARCHAR(128)    NOT NULL COMMENT '归集组名称（如"XX集团开票组"）',
+    group_code              VARCHAR(32)     NOT NULL COMMENT '归集组编号',
+    master_customer_id      BIGINT          NOT NULL COMMENT '主客户ID（开票抬头归属方）',
+    master_title_id         BIGINT          NOT NULL COMMENT '主客户开票抬头ID',
+    -- 合同补签策略
+    contract_strategy       VARCHAR(16)     NOT NULL DEFAULT 'PER_APPLY' COMMENT '合同补签策略: PER_APPLY-每次补签, FRAMEWORK-年度框架协议, EXEMPT-免补签',
+    framework_contract_id   BIGINT          COMMENT '框架补充协议ID（FRAMEWORK策略时关联）',
+    exempt_auth_file_url    VARCHAR(512)    COMMENT '免补签授权文件URL（EXEMPT策略时）',
+    -- 状态
+    status                  VARCHAR(16)     NOT NULL DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE-启用, INACTIVE-停用',
+    effective_date          DATE            COMMENT '生效日期',
+    expire_date             DATE            COMMENT '过期日期',
+    remark                  VARCHAR(512)    COMMENT '备注说明',
+    -- 公共字段
+    created_by              BIGINT,
+    created_time            DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_by              BIGINT,
+    updated_time            DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    deleted                 TINYINT(1)      NOT NULL DEFAULT 0,
+    version                 INT             NOT NULL DEFAULT 1,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_tenant_code (tenant_id, group_code),
+    KEY idx_master_customer (tenant_id, master_customer_id),
+    KEY idx_status (tenant_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开票归集组（多提货客户归一抬头）';
+```
+
+#### t_invoice_consolidation_member — 开票归集组成员
+
+```sql
+CREATE TABLE t_invoice_consolidation_member (
+    id                      BIGINT          NOT NULL COMMENT 'ID',
+    tenant_id               BIGINT          NOT NULL COMMENT '租户ID',
+    group_id                BIGINT          NOT NULL COMMENT '归集组ID',
+    customer_id             BIGINT          NOT NULL COMMENT '成员客户ID（提货方）',
+    member_role             VARCHAR(16)     NOT NULL DEFAULT 'MEMBER' COMMENT '成员角色: MASTER-主客户(抬头方), MEMBER-成员(提货方)',
+    allow_consolidation     TINYINT(1)      NOT NULL DEFAULT 1 COMMENT '是否允许归集开票',
+    -- 该成员加入归集的授权/审批信息
+    authorized_by           BIGINT          COMMENT '授权人ID',
+    authorized_time         DATETIME(3)     COMMENT '授权时间',
+    authorization_file_url  VARCHAR(512)    COMMENT '授权文件URL（集团内部授权函等）',
+    -- 状态
+    status                  VARCHAR(16)     NOT NULL DEFAULT 'ACTIVE' COMMENT '状态',
+    -- 公共字段
+    created_by              BIGINT,
+    created_time            DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_by              BIGINT,
+    updated_time            DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    deleted                 TINYINT(1)      NOT NULL DEFAULT 0,
+    version                 INT             NOT NULL DEFAULT 1,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_group_customer (group_id, customer_id),
+    KEY idx_customer_id (tenant_id, customer_id),
+    KEY idx_group_id (group_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开票归集组成员';
+```
+
 ### 2.2 单据域 (db_order)
 
 #### t_delivery_order — 提货单主表
@@ -300,6 +363,11 @@ CREATE TABLE t_invoice_apply (
     -- 抬头匹配标记
     title_match_delivery    TINYINT(1)      NOT NULL DEFAULT 1 COMMENT '开票抬头是否与提货抬头一致',
     contract_id             BIGINT          COMMENT '关联补签合同ID（抬头不一致时）',
+    -- 多提货客户归集开票
+    is_consolidated         TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '是否为归集开票（多提货客户合并到一个抬头）',
+    consolidation_group_id  BIGINT          COMMENT '归集组ID（归集开票时关联）',
+    involved_customer_ids   JSON            COMMENT '涉及的客户ID列表（归集开票时 [1001,1002,1003]）',
+    delivery_companies      JSON            COMMENT '涉及的提货方公司名称列表（归集开票时）',
     -- 进项匹配信息
     input_match_status      VARCHAR(16)     DEFAULT 'PENDING' COMMENT '进项匹配状态: PENDING, MATCHED, PARTIAL, FAILED',
     -- 人工调整标记
@@ -350,6 +418,8 @@ CREATE TABLE t_invoice_apply_order_rel (
     tenant_id           BIGINT          NOT NULL COMMENT '租户ID',
     apply_id            BIGINT          NOT NULL COMMENT '申请单ID',
     order_id            BIGINT          NOT NULL COMMENT '提货单ID',
+    order_customer_id   BIGINT          NOT NULL COMMENT '提货单所属客户ID（归集开票时可能与申请单customer_id不同）',
+    delivery_company    VARCHAR(256)    COMMENT '提货方公司名称（冗余，便于展示）',
     order_amount        DECIMAL(18,2)   NOT NULL COMMENT '本次从该单据开票金额',
     -- 公共字段
     created_by          BIGINT,
@@ -360,7 +430,8 @@ CREATE TABLE t_invoice_apply_order_rel (
     version             INT             NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     KEY idx_apply_id (apply_id),
-    KEY idx_order_id (order_id)
+    KEY idx_order_id (order_id),
+    KEY idx_order_customer (order_customer_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开票申请单与单据关联表';
 ```
 
@@ -669,6 +740,8 @@ CREATE TABLE t_contract_template (
 | `tax:account:{tenantId}:{period}` | Hash | 税务账户缓存 | 5min |
 | `invoice:apply:status:{applyId}` | String | 开票进度状态（WebSocket推送用）| 1h |
 | `rate:limit:invoice:{customerId}` | String (计数器) | 开票频率限制 | 滑动窗口 |
+| `consolidation:group:{customerId}` | Hash | 客户所属归集组信息 | 10min |
+| `consolidation:members:{groupId}` | List<Hash> | 归集组成员列表 | 10min |
 
 ---
 
@@ -682,9 +755,15 @@ t_customer ─┬─< t_customer_invoice_config
             │                    └─< t_third_party_auth
             ├─< t_invoice_apply ─┬─< t_invoice_apply_item ──> t_input_inventory
             │                    ├─< t_invoice_apply_order_rel >── t_delivery_order
+            │                    │       (order_customer_id 支持跨客户关联)
             │                    ├─< t_invoice_adjust_log
-            │                    └──> t_contract
-            └─< t_contract
+            │                    ├──> t_contract
+            │                    └──> t_invoice_consolidation_group
+            ├─< t_contract
+            └─< t_invoice_consolidation_member >── t_invoice_consolidation_group
+
+t_invoice_consolidation_group ──< t_invoice_consolidation_member >── t_customer
+  (归集组: 主客户开票抬头 ← 多个成员客户提货单归集开票)
 
 t_input_inventory ──< t_input_lock_record >── t_invoice_apply
 

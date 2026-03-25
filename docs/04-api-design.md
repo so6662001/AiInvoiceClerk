@@ -35,6 +35,10 @@
 | 10008 | 合同未签署，不允许开票 |
 | 10009 | 第三方付款需上传授权书 |
 | 10010 | 诺诺网开票失败 |
+| 10011 | 归集组成员客户开票资格校验不通过 |
+| 10012 | 不属于同一归集组，不允许跨客户合并开票 |
+| 10013 | 归集组已停用或过期 |
+| 10014 | 归集组框架协议已过期，需续签 |
 
 ### 1.3 分页参数
 
@@ -63,7 +67,7 @@ Authorization: Bearer <jwt_token>
 
 #### GET /api/v1/customer/orders/invoiceable
 
-查询当前客户可开票的单据列表
+查询当前客户可开票的单据列表。如果当前客户属于某个开票归集组的主客户，则同时返回归集组内所有成员客户的可开票单据（按成员客户分组）。
 
 **请求参数 (Query)**
 
@@ -74,6 +78,8 @@ Authorization: Bearer <jwt_token>
 | orderNo | string | 否 | 单据号模糊搜索 |
 | startDate | date | 否 | 起始日期 |
 | endDate | date | 否 | 截止日期 |
+| memberCustomerId | long | 否 | 归集组成员客户ID筛选（仅归集组主客户可用） |
+| includeMembers | boolean | 否 | 是否包含归集组成员单据，默认true |
 
 **响应示例**
 
@@ -82,59 +88,115 @@ Authorization: Bearer <jwt_token>
   "code": 200,
   "data": {
     "total": 50,
-    "list": [
+    "consolidationGroup": {
+      "groupId": 8001,
+      "groupName": "XX集团开票组",
+      "masterCustomerId": 1001,
+      "masterCustomerName": "XX集团有限公司",
+      "memberCount": 4,
+      "contractStrategy": "FRAMEWORK"
+    },
+    "ordersByCustomer": [
       {
-        "orderId": 10001,
-        "orderNo": "DO20250325001",
-        "deliveryCompany": "上海XX钢铁有限公司",
-        "totalAmount": 158000.00,
-        "totalWeight": 25.3200,
-        "invoicedAmount": 50000.00,
-        "remainAmount": 108000.00,
-        "orderDate": "2025-03-20",
-        "invoiceStatus": "PARTIAL",
-        "items": [
+        "customerId": 1001,
+        "customerName": "XX集团有限公司",
+        "memberRole": "MASTER",
+        "orders": [
           {
-            "itemId": 20001,
-            "productName": "热轧卷板",
-            "specification": "Q235B 5.75*1500*C",
-            "quantity": 12.5000,
-            "unitPrice": 4200.00,
-            "amount": 52500.00,
-            "invoicedAmount": 25000.00,
-            "remainAmount": 27500.00
-          }
-        ],
-        "paymentInfo": {
-          "totalPaid": 158000.00,
-          "payments": [
-            {
-              "paymentNo": "PAY20250318001",
-              "payerName": "上海XX钢铁有限公司",
-              "paymentType": "CORPORATE",
-              "amount": 100000.00,
-              "paymentDate": "2025-03-18"
-            },
-            {
-              "paymentNo": "PAY20250319001",
-              "payerName": "张三",
-              "paymentType": "PERSONAL",
-              "amount": 58000.00,
-              "paymentDate": "2025-03-19"
+            "orderId": 10001,
+            "orderNo": "DO20250325001",
+            "deliveryCompany": "XX集团有限公司",
+            "totalAmount": 158000.00,
+            "totalWeight": 25.3200,
+            "invoicedAmount": 50000.00,
+            "remainAmount": 108000.00,
+            "orderDate": "2025-03-20",
+            "invoiceStatus": "PARTIAL",
+            "items": [
+              {
+                "itemId": 20001,
+                "productName": "热轧卷板",
+                "specification": "Q235B 5.75*1500*C",
+                "quantity": 12.5000,
+                "unitPrice": 4200.00,
+                "amount": 52500.00,
+                "invoicedAmount": 25000.00,
+                "remainAmount": 27500.00
+              }
+            ],
+            "paymentInfo": {
+              "totalPaid": 158000.00,
+              "payments": [
+                {
+                  "paymentNo": "PAY20250318001",
+                  "payerName": "XX集团有限公司",
+                  "paymentType": "CORPORATE",
+                  "amount": 158000.00,
+                  "paymentDate": "2025-03-18"
+                }
+              ]
             }
-          ]
-        }
+          }
+        ]
+      },
+      {
+        "customerId": 1002,
+        "customerName": "XX集团上海分公司",
+        "memberRole": "MEMBER",
+        "orders": [
+          {
+            "orderId": 10005,
+            "orderNo": "DO20250324005",
+            "deliveryCompany": "XX集团上海分公司",
+            "totalAmount": 200000.00,
+            "totalWeight": 48.5000,
+            "invoicedAmount": 0,
+            "remainAmount": 200000.00,
+            "orderDate": "2025-03-24",
+            "invoiceStatus": "UN_INVOICED",
+            "paymentInfo": {
+              "totalPaid": 200000.00,
+              "payments": [
+                {
+                  "paymentNo": "PAY20250322003",
+                  "payerName": "XX集团上海分公司",
+                  "paymentType": "CORPORATE",
+                  "amount": 200000.00,
+                  "paymentDate": "2025-03-22"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "customerId": 1003,
+        "customerName": "XX集团杭州分公司",
+        "memberRole": "MEMBER",
+        "orders": [
+          {
+            "orderId": 10008,
+            "orderNo": "DO20250323008",
+            "deliveryCompany": "XX集团杭州分公司",
+            "totalAmount": 150000.00,
+            "remainAmount": 150000.00,
+            "orderDate": "2025-03-23",
+            "invoiceStatus": "UN_INVOICED"
+          }
+        ]
       }
     ]
   }
 }
 ```
 
+> 如果客户不属于任何归集组，`consolidationGroup` 为 `null`，`ordersByCustomer` 只含本客户的数据，与此前的 `list` 结构兼容。
+
 ### 2.2 开票抬头相关
 
 #### POST /api/v1/customer/invoice/resolve-title
 
-根据选择的单据自动解析开票抬头（核心接口）
+根据选择的单据自动解析开票抬头（核心接口）。支持跨客户归集开票场景：当选择了多个成员客户的单据时，强制使用归集组主客户的开票抬头。
 
 **请求体**
 
@@ -230,6 +292,89 @@ Authorization: Bearer <jwt_token>
 }
 ```
 
+**响应示例（归集开票 — 多提货客户归一抬头）**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "resolveResult": "CONSOLIDATED",
+    "suggestedTitle": {
+      "titleId": 5001,
+      "titleName": "XX集团有限公司",
+      "taxNo": "91310000XXXXXXXXXX",
+      "address": "上海市XX区XX路XX号",
+      "phone": "021-XXXXXXXX",
+      "bankName": "中国工商银行上海分行",
+      "bankAccount": "1001XXXXXXXXXXXX"
+    },
+    "consolidationInfo": {
+      "groupId": 8001,
+      "groupName": "XX集团开票组",
+      "titleLocked": true,
+      "titleLockedReason": "归集开票模式下，开票抬头强制使用归集组主客户的抬头",
+      "contractStrategy": "FRAMEWORK",
+      "frameworkContractValid": true,
+      "frameworkContractExpireDate": "2025-12-31"
+    },
+    "involvedCustomers": [
+      {
+        "customerId": 1001,
+        "customerName": "XX集团有限公司",
+        "deliveryCompany": "XX集团有限公司",
+        "orderCount": 1,
+        "orderAmount": 108000.00,
+        "titleMatchDelivery": true,
+        "invoiceQualification": "PASSED"
+      },
+      {
+        "customerId": 1002,
+        "customerName": "XX集团上海分公司",
+        "deliveryCompany": "XX集团上海分公司",
+        "orderCount": 1,
+        "orderAmount": 200000.00,
+        "titleMatchDelivery": false,
+        "needContractSupplement": false,
+        "invoiceQualification": "PASSED"
+      },
+      {
+        "customerId": 1003,
+        "customerName": "XX集团杭州分公司",
+        "deliveryCompany": "XX集团杭州分公司",
+        "orderCount": 1,
+        "orderAmount": 150000.00,
+        "titleMatchDelivery": false,
+        "needContractSupplement": false,
+        "invoiceQualification": "PASSED"
+      }
+    ],
+    "paymentAnalysis": {
+      "perCustomerCheck": true,
+      "customerPayments": [
+        {
+          "customerId": 1001,
+          "isConsistent": true,
+          "status": "PASSED"
+        },
+        {
+          "customerId": 1002,
+          "isConsistent": true,
+          "status": "PASSED"
+        },
+        {
+          "customerId": 1003,
+          "isConsistent": true,
+          "status": "PASSED"
+        }
+      ]
+    },
+    "titleMatchDelivery": false,
+    "needContractSupplement": false,
+    "contractSupplementExemptReason": "归集组已有有效框架补充协议"
+  }
+}
+```
+
 #### GET /api/v1/customer/invoice/titles
 
 查询客户已保存的开票抬头列表
@@ -259,18 +404,20 @@ Authorization: Bearer <jwt_token>
 
 #### POST /api/v1/customer/invoice/apply
 
-提交开票申请
+提交开票申请。支持归集开票：当 `consolidationGroupId` 不为空时，`orderAmounts` 中的 `orderId` 可以来自归集组内不同成员客户的提货单。
 
 **请求体**
 
 ```json
 {
-  "orderIds": [10001, 10002],
+  "orderIds": [10001, 10005, 10008],
   "titleId": 5001,
   "invoiceType": "SPECIAL",
+  "consolidationGroupId": 8001,
   "orderAmounts": [
-    { "orderId": 10001, "amount": 108000.00 },
-    { "orderId": 10002, "amount": 75000.00 }
+    { "orderId": 10001, "customerId": 1001, "amount": 108000.00 },
+    { "orderId": 10005, "customerId": 1002, "amount": 200000.00 },
+    { "orderId": 10008, "customerId": 1003, "amount": 150000.00 }
   ],
   "remark": "请尽快开具",
   "thirdPartyAuthId": null,
@@ -646,6 +793,131 @@ Authorization: Bearer <jwt_token>
   "targetTaxRateMax": 3.0,
   "targetMarginMin": 1.5,
   "targetMarginMax": 5.0
+}
+```
+
+### 3.8 开票归集组管理
+
+#### GET /api/v1/admin/consolidation-group/list
+
+查询开票归集组列表
+
+#### POST /api/v1/admin/consolidation-group
+
+创建开票归集组
+
+**请求体**
+
+```json
+{
+  "groupName": "XX集团开票组",
+  "groupCode": "CG20250325001",
+  "masterCustomerId": 1001,
+  "masterTitleId": 5001,
+  "contractStrategy": "FRAMEWORK",
+  "effectiveDate": "2025-01-01",
+  "expireDate": "2025-12-31",
+  "members": [
+    { "customerId": 1002, "allowConsolidation": true },
+    { "customerId": 1003, "allowConsolidation": true },
+    { "customerId": 1004, "allowConsolidation": true }
+  ],
+  "remark": "XX集团及其子公司统一开票"
+}
+```
+
+**响应示例**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "groupId": 8001,
+    "groupCode": "CG20250325001",
+    "groupName": "XX集团开票组",
+    "masterCustomerName": "XX集团有限公司",
+    "memberCount": 4,
+    "status": "ACTIVE"
+  }
+}
+```
+
+#### PUT /api/v1/admin/consolidation-group/{groupId}
+
+更新归集组（修改成员、合同策略等）
+
+#### POST /api/v1/admin/consolidation-group/{groupId}/members
+
+添加成员客户
+
+**请求体**
+
+```json
+{
+  "customerId": 1005,
+  "allowConsolidation": true,
+  "authorizationFileUrl": "/files/auth/group_8001_cust_1005.pdf"
+}
+```
+
+#### DELETE /api/v1/admin/consolidation-group/{groupId}/members/{customerId}
+
+移除成员客户
+
+#### GET /api/v1/admin/consolidation-group/{groupId}
+
+查询归集组详情（含所有成员及其开票统计）
+
+**响应示例**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "groupId": 8001,
+    "groupName": "XX集团开票组",
+    "groupCode": "CG20250325001",
+    "masterCustomerId": 1001,
+    "masterCustomerName": "XX集团有限公司",
+    "masterTitleName": "XX集团有限公司",
+    "masterTitleTaxNo": "91310000XXXXXXXXXX",
+    "contractStrategy": "FRAMEWORK",
+    "frameworkContractStatus": "EFFECTIVE",
+    "frameworkContractExpireDate": "2025-12-31",
+    "status": "ACTIVE",
+    "members": [
+      {
+        "customerId": 1001,
+        "customerName": "XX集团有限公司",
+        "memberRole": "MASTER",
+        "allowConsolidation": true,
+        "totalConsolidatedAmount": 850000.00,
+        "lastInvoiceDate": "2025-03-25"
+      },
+      {
+        "customerId": 1002,
+        "customerName": "XX集团上海分公司",
+        "memberRole": "MEMBER",
+        "allowConsolidation": true,
+        "totalConsolidatedAmount": 620000.00,
+        "lastInvoiceDate": "2025-03-24"
+      },
+      {
+        "customerId": 1003,
+        "customerName": "XX集团杭州分公司",
+        "memberRole": "MEMBER",
+        "allowConsolidation": true,
+        "totalConsolidatedAmount": 450000.00,
+        "lastInvoiceDate": "2025-03-22"
+      }
+    ],
+    "statistics": {
+      "totalInvoiceCount": 15,
+      "totalInvoiceAmount": 1920000.00,
+      "thisMonthCount": 5,
+      "thisMonthAmount": 680000.00
+    }
+  }
 }
 ```
 
